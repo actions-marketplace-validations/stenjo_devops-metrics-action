@@ -79,7 +79,7 @@
     "@babel/plugin-transform-class-properties": "^7.24.7",
     "@babel/preset-env": "^7.22.20",
     "@babel/preset-typescript": "^7.23.2",
-    "@jest/globals": "^29.7.0",
+    "@jest/globals": "^30.2.0",
     "@stryker-mutator/core": "^8.3.0",
     "@stryker-mutator/jest-runner": "^8.3.0",
     "@stryker-mutator/typescript-checker": "^8.3.0",
