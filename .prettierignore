@@ -1,3 +1,6 @@
 dist/
 lib/
 node_modules/
+data/
+coverage/
+CHANGELOG.md

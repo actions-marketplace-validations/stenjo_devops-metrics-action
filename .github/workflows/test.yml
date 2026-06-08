@@ -8,21 +8,25 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   # unit tests
   units:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     env:
-      covGistPrefix: 'https://gist.githubusercontent.com/stenjo/9ce1ad7d8e9db99796e782b244eefa4a/raw/f52cd85b82dd774ba0ce9d052f7ff2be505ea2d0'
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         id: setup-node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
           node-version-file: .node-version
           cache: npm
@@ -30,18 +34,18 @@ jobs:
       - run: npm ci
       - name: Run tests
         run: |
-          npx jest --coverage | tee ./coverage.txt && exit "${PIPESTATUS[0]}"
+          npx vitest run --coverage 2>&1 | tee ./coverage.txt
 
       - name: Get branch name
         id: branch-name
-        uses: tj-actions/branch-names@v8
+        uses: tj-actions/branch-names@5250492686b253f06fa55861556d1027b067aeb5 # v9
 
-      - name: Jest Coverage Comment
+      - name: Vitest Coverage Comment
         id: coverageComment
-        uses: MishaKav/jest-coverage-comment@main
+        uses: MishaKav/jest-coverage-comment@40d7aed38d0fbaea266c34c12ab06356eec894eb # main
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          summary-title: Jest Coverage (summary)
+          summary-title: Vitest Coverage (summary)
           title: Test Coverage
           coverage-summary-path: coverage/coverage-summary.json
           coverage-path: ./coverage.txt
@@ -53,32 +57,35 @@ jobs:
           echo "Summary HTML - ${{ steps.coverageComment.outputs.summaryHtml }}"
           mv coverage/coverage-summary.json .
 
-      - name: Create the Badge
-        uses: schneegans/dynamic-badges-action@v1.7.0
+      - name: Create coverage badge
         if: steps.branch-name.outputs.current_branch == 'main'
-        with:
-          auth: ${{ secrets.GIST_AUTH_TOKEN }}
-          gistID: 9ce1ad7d8e9db99796e782b244eefa4a
-          filename: devops_metrics__${{ steps.branch-name.outputs.current_branch }}.json
-          label: Test Coverage
-          message: ${{ steps.coverageComment.outputs.coverage }}%
-          color: ${{ steps.coverageComment.outputs.color }}
-          namedLogo: jest
+        run: |
+          COVERAGE=${{ steps.coverageComment.outputs.coverage }}
+          COLOR=${{ steps.coverageComment.outputs.color }}
+          mkdir -p badges
+          curl -s "https://img.shields.io/badge/Test%20Coverage-${COVERAGE}%25-${COLOR}" > badges/coverage.svg
 
-      - name: Gist Sync File
-        uses: danielmcconville/gist-sync-file-action@v2.0.0
+      - name: Commit coverage badge and summary
         if: steps.branch-name.outputs.current_branch == 'main'
-        with:
-          gistPat: ${{ secrets.GIST_AUTH_TOKEN }}
-          action: update
-          filename: coverage-summary.json
-          gistId: 9ce1ad7d8e9db99796e782b244eefa4a
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          mkdir -p data
+          cp coverage-summary.json data/coverage-summary.json
+          git add badges/coverage.svg data/coverage-summary.json
+          if ! git diff --staged --quiet; then
+            git commit -m "Update coverage badge and summary [skip ci]"
+            git push
+          fi
 
-      - name: Get coverage Gist
+      - name: Get main coverage for diff
         if: steps.branch-name.outputs.current_branch != 'main'
         run: |
-          curl -o main-coverage.json ${{ env.covGistPrefix }}/coverage-summary.json
-          function diff {     diff="$(echo "$2" - "$1" | bc -l | sed -e 's/^\./0./' -e 's/^-\./-0./')";     echo "$diff"; }
+          curl -sf "https://raw.githubusercontent.com/${{ github.repository }}/main/data/coverage-summary.json" -o main-coverage.json || echo '{"total":{"lines":{"pct":0}}}' > main-coverage.json
+          function diff {     diff="$(echo "$2" - "$1" | bc -l | sed -e 's/^\./0./' -e 's/^-\./-0./')" ;    echo "$diff"; }
           current=$(jq .total.lines.pct coverage-summary.json)
           main=$(jq .total.lines.pct main-coverage.json)
           pctLineChange=$(diff "$main" "$current")
@@ -89,7 +96,7 @@ jobs:
 
       - name: Add PR Comment with coverage diff
         if: steps.branch-name.outputs.current_branch != 'main'
-        uses: mshick/add-pr-comment@v2
+        uses: mshick/add-pr-comment@8e4927817251f1ff60c001f04568532b38e0b4a0 # v3.11.0
         with:
           message-path: coverage.md
           update-only: false
@@ -101,7 +108,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
       - uses: ./
         id: dora
         with:
@@ -114,12 +123,12 @@ jobs:
       # Use the output from the `dora` step
       - name: Get the output rate
         run: |
-          printf "The deploy rate was %s" ${{ steps.dora.outputs.deploy-rate }}      # Use the output from the `dora` step
-          printf "The log was:\n%s" ${{ steps.dora.outputs.deploy-rate-log }}      # Use the output from the `dora` step
-          printf "${{ steps.dora.outputs.deploy-rate-log }}" > deploy-rate-log.txt
-          echo "The lead time was ${{ steps.dora.outputs.lead-time }}"      # Use the output from the `dora` step
+          printf "The deploy rate was %s" "${{ steps.dora.outputs.deploy-rate }}"
+          printf "The log was:\n%s" "${{ steps.dora.outputs.deploy-rate-log }}"
+          printf "%s" "${{ steps.dora.outputs.deploy-rate-log }}" > deploy-rate-log.txt
+          echo "The lead time was ${{ steps.dora.outputs.lead-time }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: logs
           path: ./*-log.txt
